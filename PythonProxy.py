@@ -98,10 +98,10 @@ class ConnectionHandler:
         self.client_buffer = ''
         self.timeout = timeout
         self.content_length = None
+        self.host = None
 
         #print the request and it extracts the protocol and path
         self.method, self.path, self.protocol = self.get_base_header()
-        self.get_content_length()
 
         if self.method=='CONNECT':
             self.method_CONNECT()
@@ -117,10 +117,17 @@ class ConnectionHandler:
 
 
     def get_content_length(self):
-        self.target.send('%s %s %s\n%s\n'%('HEAD'+self.method, path, self.protocol)+self.client_buffer)
-        
+        i = self.path.find('/')
+        path = self.path[i:]
+        s = "HEAD " + path + " " + self.protocol + "\r\n"
+        s += "Host: " + self.host + "\r\n\r\n"
+        print "Sending Request For Content Length...."
+        print s
+        self.target.send(s)
         data = self.target.recv(BUFLEN)
-        print("data: ", data)
+        print data
+        return re.search(r'Content-Length: \d+', data).group(0).split(" ")[1]
+
         #check accept_range.. bytes means OK to split
 
     def get_base_header(self):
@@ -131,10 +138,10 @@ class ConnectionHandler:
                 break
 
         #print the request
-        print("get_base_header::self.client_buffer: ", self.client_buffer)
+        #print("get_base_header::self.client_buffer: ", self.client_buffer)
         #self.content_length = self.get_content_length()
 
-        print '%s'%self.client_buffer[:end]#debug
+        #print '%s'%self.client_buffer[:end]#debug
         data = (self.client_buffer[:end+1]).split()
         self.client_buffer = self.client_buffer[end+1:]
         return data
@@ -164,14 +171,15 @@ class ConnectionHandler:
     #forward the packet to its final destination
     def method_others(self):
         self.path = self.path[7:]
-        print("self.path: ", self.path)
+        #print("self.path: ", self.path)
         i = self.path.find('/')
-        host = self.path[:i]
+        self.host = self.path[:i]
         path = self.path[i:]
-        print("path: ", path)
-        self._connect_target(host)
+        #print("path: ", path)
+        self._connect_target(self.host)
 
         #TO DO: first find out the Content-Length by sending a RANGE request
+        self.content_length = self.get_content_length()
 
         # print("content_length: ", self.get_content_length())
         # print("protocol: ", self.protocol)
@@ -180,7 +188,7 @@ class ConnectionHandler:
         percent = 0.3
         range1 = self.get_range(percent)
         print(self.create_range(0,range1))
-        print(self.create_range(range1+1,self.content_length))
+        print(self.create_range(range1+1, self.content_length))
 
         #### Target 1
         print("*"*10)
@@ -190,6 +198,10 @@ class ConnectionHandler:
         self.target.send('%s %s %s\n%s\n'%(self.method, path, self.protocol,
                          self.create_range(0,range1))+self.client_buffer)
 
+
+        data1 = self.target.recv(BUFLEN)
+        print "DATA1:" , data1
+        #raw_input("Press Any Key To Continue....")
         #### Target 2
         #TO DO: need to send another request to "target2" that GETs a different range of bytes
         print("*"*10)
@@ -198,6 +210,10 @@ class ConnectionHandler:
 
         self.target2.send('%s %s %s\n%s\n'%(self.method, path, self.protocol,
                          self.create_range(range1+1, self.content_length))+self.client_buffer)
+
+        data2 = self.target2.recv(BUFLEN)
+        print "DATA2:" , data2
+        #raw_input("Press Any Key To Continue....")
 
         self.client_buffer = ''
 
@@ -212,24 +228,32 @@ class ConnectionHandler:
         else:
             #listen on port 80
             port = 80
+
+        print "Setting Up Connection Target 1...."
         (soc_family, _, _, _, address) = socket.getaddrinfo(host, port)[0]
-        (soc_family2, _, _, _, address) = socket.getaddrinfo(host, 9000)[0]
         self.target = socket.socket(soc_family)
-        self.target2 = socket.socket(soc_family2)
         self.target.connect(address)
+
+        print "Setting Up Connection Target 2...."
+        (soc_family, _, _, _, address) = socket.getaddrinfo(host, port)[0]
+        self.target2 = socket.socket(soc_family)
         self.target2.connect(address)
+
+        print "Success"
 
     #"revolving door" to re-direct the packets in the right direction
     def _read_write(self):
         time_out_max = self.timeout/3
         socs = [self.client, self.target, self.target2]
         count = 0
+        rec = 0
         while 1:
             count += 1
             (recv, _, error) = select.select(socs, [], socs, 3)
             if error:
                 break
             if recv:
+                rec += 1
                 for in_ in recv:
                     data = in_.recv(BUFLEN)
                     if in_ is self.client:
@@ -237,10 +261,18 @@ class ConnectionHandler:
                     else:
                         out = self.client
                     if data:
-                        #TO DO: Check if it's response to the RANGE request and extract the Content-Length
-
-
-                        #TO DO: merge the data from both interfaces into one big data, if we are receiving
+                        if rec == 1:
+                            data1 = data.split(" ")[-1]
+                            print "Length of Data 1: ",  len(data1)
+                            #TO DO: Check if it's response to the RANGE request and extract the Content-Length
+                            #TO DO: merge the data from both interfaces into one big data, if we are receiving
+                        else:
+                            data2 = data.split(" ")[-1]
+                            print "Length of Data 2: ",  len(data2)
+                            merged = data1 + data2
+                            print "Length of Data Merged: " , len(merged)
+                            raw_input("Press Any Key To Continue")
+                            data = merged
 
                         out.send(data)
                         count = 0
