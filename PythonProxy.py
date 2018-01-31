@@ -180,6 +180,7 @@ class ConnectionHandler:
 
         #TO DO: first find out the Content-Length by sending a RANGE request
         self.content_length = self.get_content_length()
+        BUFLEN = self.content_length
 
         # print("content_length: ", self.get_content_length())
         # print("protocol: ", self.protocol)
@@ -198,22 +199,27 @@ class ConnectionHandler:
         self.target.send('%s %s %s\n%s\n'%(self.method, path, self.protocol,
                          self.create_range(0,range1))+self.client_buffer)
 
+        #data1 = self.target.recv(BUFLEN)
+        #data1 = data.split(" ")[-1]
+        #print "Length of Data 1: ",  len(data1)
 
-        data1 = self.target.recv(BUFLEN)
-        print "DATA1:" , data1
+        #TO DO: Check if it's response to the RANGE request and extract the Content-Length
+        #TO DO: merge the data from both interfaces into one big data, if we are receiving
         #raw_input("Press Any Key To Continue....")
+
         #### Target 2
         #TO DO: need to send another request to "target2" that GETs a different range of bytes
-        print("*"*10)
-        print('%s %s %s\n%s\n'%(self.method, path, self.protocol,self.create_range(range1+1, self.content_length))+
-                         self.client_buffer)
 
-        self.target2.send('%s %s %s\n%s\n'%(self.method, path, self.protocol,
-                         self.create_range(range1+1, self.content_length))+self.client_buffer)
+        self.target2.send('%s %s %s\n%s\n'%(self.method, path, self.protocol, self.create_range(range1+1, self.content_length))+self.client_buffer)
+        #data2 = self.target2.recv(BUFLEN)
+        #data2 = data.split(" ")[-1]
+        #print "Length of Data 2: ",  len(data2)
 
-        data2 = self.target2.recv(BUFLEN)
-        print "DATA2:" , data2
+        #merged = data1 + data2
+        #print "Length of Data Merged: " , len(merged)
         #raw_input("Press Any Key To Continue....")
+        #data = merged
+
 
         self.client_buffer = ''
 
@@ -246,34 +252,33 @@ class ConnectionHandler:
         time_out_max = self.timeout/3
         socs = [self.client, self.target, self.target2]
         count = 0
-        rec = 0
+        data1 = None
+        data2 = None
+
         while 1:
             count += 1
             (recv, _, error) = select.select(socs, [], socs, 3)
             if error:
                 break
             if recv:
-                rec += 1
                 for in_ in recv:
                     data = in_.recv(BUFLEN)
+                    print "Recieved, data1 is: ", data1
                     if in_ is self.client:
                         out = self.target
-                    else:
+                    elif (in_ is self.target) and data1 is None:
+                        data1 = data.split(" ")[-1]
+                        print "Length of Data 1: ",  len(data1)
+                        data = None
+                    elif (in_ is self.target) and data:
                         out = self.client
+                        data2 = data.split(" ")[-1]
+                        print "Length of Data 2: ",  len(data2)
+                        data = data1 + data2
+                        print "Length of Data Merged: ",  len(data)
+                        raw_input("Press Any Key To Continue....")
+                        data1 = None
                     if data:
-                        if rec == 1:
-                            data1 = data.split(" ")[-1]
-                            print "Length of Data 1: ",  len(data1)
-                            #TO DO: Check if it's response to the RANGE request and extract the Content-Length
-                            #TO DO: merge the data from both interfaces into one big data, if we are receiving
-                        else:
-                            data2 = data.split(" ")[-1]
-                            print "Length of Data 2: ",  len(data2)
-                            merged = data1 + data2
-                            print "Length of Data Merged: " , len(merged)
-                            raw_input("Press Any Key To Continue")
-                            data = merged
-
                         out.send(data)
                         count = 0
             if count == time_out_max:
