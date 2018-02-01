@@ -81,7 +81,7 @@ Qual a diferença entre um proxy Elite, Anónimo e Transparente?
 
 """
 
-import socket, thread, select
+import socket, thread, select, sys
 import subprocess as sp
 import re
 import math
@@ -137,10 +137,6 @@ class ConnectionHandler:
             if end!=-1:
                 break
 
-        #print the request
-        #print("get_base_header::self.client_buffer: ", self.client_buffer)
-        #self.content_length = self.get_content_length()
-
         #print '%s'%self.client_buffer[:end]#debug
         data = (self.client_buffer[:end+1]).split()
         self.client_buffer = self.client_buffer[end+1:]
@@ -162,7 +158,6 @@ class ConnectionHandler:
     def get_range(self,percent):
         # creates range of bits for range using a percent of content_length
         print("percent: ", percent)
-        print("percent: ", type(percent))
         first = percent * float(int(self.content_length))
         first = int(math.floor(first))
         #print("first: ", first)
@@ -171,60 +166,39 @@ class ConnectionHandler:
     #forward the packet to its final destination
     def method_others(self):
         self.path = self.path[7:]
-        #print("self.path: ", self.path)
         i = self.path.find('/')
         self.host = self.path[:i]
         path = self.path[i:]
-        #print("path: ", path)
         self._connect_target(self.host)
 
-        #TO DO: first find out the Content-Length by sending a RANGE request
-        self.content_length = self.get_content_length()
-        BUFLEN = self.content_length
+        if self.method == 'GET':
+            self.content_length = self.get_content_length()
+            data1 = ""
+            data2 = ""
 
-        # print("content_length: ", self.get_content_length())
-        # print("protocol: ", self.protocol)
-        # print("method: ", self.method)
-        # print("client_buffer: ", self.client_buffer)
-        percent = 0.3
-        range1 = self.get_range(percent)
-        print(self.create_range(0,range1))
-        print(self.create_range(range1+1, self.content_length))
-
-        #### Target 1
-        print("*"*10)
-        print('%s %s %s\n%s\n'%(self.method, path, self.protocol,self.create_range(0,range1))+
-                         self.client_buffer)
-
-        self.target.send('%s %s %s\n%s\n'%(self.method, path, self.protocol,
-                         self.create_range(0,range1))+self.client_buffer)
-
-        #data1 = self.target.recv(BUFLEN)
-        #data1 = data.split(" ")[-1]
-        #print "Length of Data 1: ",  len(data1)
-
-        #TO DO: Check if it's response to the RANGE request and extract the Content-Length
-        #TO DO: merge the data from both interfaces into one big data, if we are receiving
-        #raw_input("Press Any Key To Continue....")
-
-        #### Target 2
-        #TO DO: need to send another request to "target2" that GETs a different range of bytes
-
-        self.target2.send('%s %s %s\n%s\n'%(self.method, path, self.protocol, self.create_range(range1+1, self.content_length))+self.client_buffer)
-        #data2 = self.target2.recv(BUFLEN)
-        #data2 = data.split(" ")[-1]
-        #print "Length of Data 2: ",  len(data2)
-
-        #merged = data1 + data2
-        #print "Length of Data Merged: " , len(merged)
-        #raw_input("Press Any Key To Continue....")
-        #data = merged
+            percent = 0.5
+            byte_range = self.get_range(percent)
+            print byte_range
+            print type(byte_range)
+            print self.content_length
+            print type(self.content_length)
+            data1 = self.get(self.target2, 0,byte_range)
+            raw_input("Press Any Key To Continue....")
+            end = str(int(self.content_length) - 1)
+            data2 = self.get(self.target, byte_range+1, end)
+            #data2 = self.get(self.target, byte_range, end+"/"+self.content_length)
+            data = data1 + data2
+            print "Merged Data Length: " , sys.getsizeof(data)
+            raw_input("Press Any Key To Continue....")
 
 
-        self.client_buffer = ''
 
-        #start the read/write function
-        self._read_write()
+        else:
+            self.target.send('%s %s %s\n%s\n'%(self.method, path, self.protocol , self.client_buffer))
+            self.client_buffer = ''
+
+            #start the read/write function
+            self._read_write()
 
     def _connect_target(self, host):
         i = host.find(':')
@@ -246,6 +220,50 @@ class ConnectionHandler:
         self.target2.connect(address)
 
         print "Success"
+    
+
+    def read(self, socs):
+        time_out_max = self.timeout/3
+        read = 1
+        count = 0
+        r = ''
+        print "SOCS: ", socs
+        while read:
+            count += 1
+            (recv, _, error) = select.select(socs, [], socs, 3)
+            if error:
+                read = 0
+            if recv:
+                for in_ in recv:
+                    data = in_.recv(10000)
+                    if data:
+                        r += data
+                        count = 0
+            if count == time_out_max:
+                read = 0
+
+        return r
+
+        pass
+
+    def write(self):
+        pass
+
+    def get(self, target, start_byte, end_byte):
+        data1 = ''
+        i = self.path.find('/')
+        path = self.path[i:]
+        print("Inside The Get Request\n")
+
+        print('%s %s %s\n%s\n'%(self.method, path, self.protocol,self.create_range(start_byte,end_byte))+self.client_buffer)
+        target.send('%s %s %s\n%s\n'%(self.method, path, self.protocol,self.create_range(start_byte,end_byte))+self.client_buffer)
+        print type(sys.getsizeof("as;dlfkja;lsdkjf"))
+        while(sys.getsizeof(data1) < (int(end_byte) - int(start_byte))):
+            data1 += target.recv(10000)
+        print "Length of Data : ", sys.getsizeof(data1)
+        i = data1.find('\r\n\r\n') + 8
+        return data1[i:]
+
 
     #"revolving door" to re-direct the packets in the right direction
     def _read_write(self):
@@ -266,18 +284,8 @@ class ConnectionHandler:
                     print "Recieved, data1 is: ", data1
                     if in_ is self.client:
                         out = self.target
-                    elif (in_ is self.target) and data1 is None:
-                        data1 = data.split(" ")[-1]
-                        print "Length of Data 1: ",  len(data1)
-                        data = None
-                    elif (in_ is self.target) and data:
+                    else:
                         out = self.client
-                        data2 = data.split(" ")[-1]
-                        print "Length of Data 2: ",  len(data2)
-                        data = data1 + data2
-                        print "Length of Data Merged: ",  len(data)
-                        raw_input("Press Any Key To Continue....")
-                        data1 = None
                     if data:
                         out.send(data)
                         count = 0
