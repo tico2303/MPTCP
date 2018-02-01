@@ -90,8 +90,9 @@ __version__ = '0.1.0 Draft 1'
 BUFLEN = 8192
 VERSION = 'Python Proxy/'+__version__
 HTTPVER = 'HTTP/1.1'
-
 CONTENT_PAT = '(Content-Length:) (\d*)'
+PARTIAL_CONTENT = 206
+
 class ConnectionHandler:
     def __init__(self, connection, address, timeout):
         self.client = connection
@@ -157,7 +158,7 @@ class ConnectionHandler:
 
     def get_range(self,percent):
         # creates range of bits for range using a percent of content_length
-        print("percent: ", percent)
+        #print("percent: ", percent)
         first = percent * float(int(self.content_length))
         first = int(math.floor(first))
         #print("first: ", first)
@@ -178,20 +179,19 @@ class ConnectionHandler:
 
             percent = 0.5
             byte_range = self.get_range(percent)
-            print byte_range
-            print type(byte_range)
-            print self.content_length
-            print type(self.content_length)
+            print("byte_range: ", byte_range, type(byte_range))
+            print("Content length: ", self.content_length,type(self.content_length))
             data1 = self.get(self.target2, 0,byte_range)
-            raw_input("Press Any Key To Continue....")
+            #raw_input("Press Any Key To Continue....")
             end = str(int(self.content_length) - 1)
             data2 = self.get(self.target, byte_range+1, end)
             #data2 = self.get(self.target, byte_range, end+"/"+self.content_length)
             data = data1 + data2
-            print "Merged Data Length: " , sys.getsizeof(data)
-            raw_input("Press Any Key To Continue....")
-
-
+            print("Merged Data Length: " , sys.getsizeof(data))
+            print("Original Content length: ",self.content_length)
+            print("difference of {} bytes between content length and merged data".format(int(self.content_length)-sys.getsizeof(data)))
+            self.write(data)
+            #raw_input("Press Any Key To Continue....")
 
         else:
             self.target.send('%s %s %s\n%s\n'%(self.method, path, self.protocol , self.client_buffer))
@@ -218,9 +218,7 @@ class ConnectionHandler:
         (soc_family, _, _, _, address) = socket.getaddrinfo(host, port)[0]
         self.target2 = socket.socket(soc_family)
         self.target2.connect(address)
-
         print "Success"
-    
 
     def read(self, socs):
         time_out_max = self.timeout/3
@@ -244,24 +242,31 @@ class ConnectionHandler:
 
         return r
 
-        pass
-
-    def write(self):
-        pass
+    def write(self,data):
+        with open('out.jpg','wb') as f:
+            f.write(data)
 
     def get(self, target, start_byte, end_byte):
         data1 = ''
         i = self.path.find('/')
         path = self.path[i:]
-        print("Inside The Get Request\n")
 
+        print("Inside The Get Request\n")
         print('%s %s %s\n%s\n'%(self.method, path, self.protocol,self.create_range(start_byte,end_byte))+self.client_buffer)
         target.send('%s %s %s\n%s\n'%(self.method, path, self.protocol,self.create_range(start_byte,end_byte))+self.client_buffer)
-        print type(sys.getsizeof("as;dlfkja;lsdkjf"))
+
         while(sys.getsizeof(data1) < (int(end_byte) - int(start_byte))):
             data1 += target.recv(10000)
+
+        #make sure response is a 206 partial content header
+        response = int(data1.split('\r\n')[0].split(' ')[1])
+        if response ==PARTIAL_CONTENT:
+            print("Success Partial Content 206 response Header recieved")
+        print("response: ", response)
+
         print "Length of Data : ", sys.getsizeof(data1)
-        i = data1.find('\r\n\r\n') + 8
+        # print("data1: ", data1)
+        i = data1.find('\r\n\r\n')+4
         return data1[i:]
 
 
