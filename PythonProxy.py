@@ -82,6 +82,7 @@ Qual a diferença entre um proxy Elite, Anónimo e Transparente?
 """
 
 import socket, thread, select, sys
+import threading
 import subprocess as sp
 import re
 import math
@@ -100,6 +101,7 @@ class ConnectionHandler:
         self.timeout = timeout
         self.content_length = None
         self.host = None
+        self.bytes_list = []
 
         #print the request and it extracts the protocol and path
         self.method, self.path, self.protocol = self.get_base_header()
@@ -164,6 +166,37 @@ class ConnectionHandler:
         #print("first: ", first)
         return first
 
+    def get(self, target, start_byte, end_byte, l):
+        data = ''
+        i = self.path.find('/')
+        path = self.path[i:]
+
+        print("Inside The Get Request\n")
+        print('%s %s %s\n%s\n'%(self.method, path, self.protocol,self.create_range(start_byte,end_byte))+self.client_buffer)
+        target.send('%s %s %s\n%s\n'%(self.method, path, self.protocol,self.create_range(start_byte,end_byte))+self.client_buffer)
+
+        while(sys.getsizeof(data) < (int(end_byte) - int(start_byte))):
+            data += target.recv(10000)
+
+        #make sure response is a 206 partial content header
+        #response = int(data.split('\r\n')[0].split(' ')[1])
+        #if response == PARTIAL_CONTENT:
+        #    print("Success Partial Content 206 response Header recieved")
+        #print("response: ", response)
+
+        # print("data1: ", data1)
+        i = data.find('\r\n\r\n')+4
+        data = data[i:]
+        print data
+        l.append(data)
+        print l
+        print "Length of Data : ", sys.getsizeof(data)
+        print " Length of Lower Bytes : ", sys.getsizeof(self.bytes_list[0])
+        print " Length of Upper Bytes : ", sys.getsizeof(self.bytes_list[1])
+        raw_input("Returning From Get...")
+        
+        return
+
     #forward the packet to its final destination
     def method_others(self):
         self.path = self.path[7:]
@@ -173,21 +206,36 @@ class ConnectionHandler:
         self._connect_target(self.host)
 
         if self.method == 'GET':
+            
+            """ Make A HEAD request and parse for the content range in bytes """
+            #TODO: We should also parse and check that the server allows for Partion byte range requests
             self.content_length = self.get_content_length()
-            data1 = ""
-            data2 = ""
 
+
+            """ Make two get requests, each its own percentage of the overall data """
             percent = 0.5
             byte_range = self.get_range(percent)
             print("byte_range: ", byte_range, type(byte_range))
             print("Content length: ", self.content_length,type(self.content_length))
-            data1 = self.get(self.target2, 0,byte_range)
-            #raw_input("Press Any Key To Continue....")
+
+            """ Make a get request for the lower range of bytes on its own thread """
+            get_request_low_range = threading.Thread(target=self.get, args=(self.target, 0, byte_range, self.bytes_list))
+            get_request_low_range.daemon = True
+            get_request_low_range.start()
+
+            """ Make a get request for the higher range of bytes on its own thread """
             end = str(int(self.content_length) - 1)
-            data2 = self.get(self.target, byte_range+1, end)
-            #data2 = self.get(self.target, byte_range, end+"/"+self.content_length)
-            data = data1 + data2
+            get_request_high_range = threading.Thread(target=self.get, args=(self.target2, byte_range+1, end, self.bytes_list))
+            get_request_high_range.daemon = True
+            get_request_high_range.start()
+
+            
+            get_request_low_range.join()
+            get_request_high_range.join()
+            
+            data = "".join(self.bytes_list)
             print("Merged Data Length: " , sys.getsizeof(data))
+            print data + "."
             print("Original Content length: ",self.content_length)
             print("difference of {} bytes between content length and merged data".format(int(self.content_length)-sys.getsizeof(data)))
             self.write(data)
@@ -246,28 +294,6 @@ class ConnectionHandler:
         with open('out.jpg','wb') as f:
             f.write(data)
 
-    def get(self, target, start_byte, end_byte):
-        data1 = ''
-        i = self.path.find('/')
-        path = self.path[i:]
-
-        print("Inside The Get Request\n")
-        print('%s %s %s\n%s\n'%(self.method, path, self.protocol,self.create_range(start_byte,end_byte))+self.client_buffer)
-        target.send('%s %s %s\n%s\n'%(self.method, path, self.protocol,self.create_range(start_byte,end_byte))+self.client_buffer)
-
-        while(sys.getsizeof(data1) < (int(end_byte) - int(start_byte))):
-            data1 += target.recv(10000)
-
-        #make sure response is a 206 partial content header
-        response = int(data1.split('\r\n')[0].split(' ')[1])
-        if response ==PARTIAL_CONTENT:
-            print("Success Partial Content 206 response Header recieved")
-        print("response: ", response)
-
-        print "Length of Data : ", sys.getsizeof(data1)
-        # print("data1: ", data1)
-        i = data1.find('\r\n\r\n')+4
-        return data1[i:]
 
 
     #"revolving door" to re-direct the packets in the right direction
