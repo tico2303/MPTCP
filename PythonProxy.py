@@ -102,6 +102,7 @@ class ConnectionHandler:
         self.content_length = None
         self.host = None
         self.bytes_list = []
+        self.data = ""
 
         #print the request and it extracts the protocol and path
         self.method, self.path, self.protocol = self.get_base_header()
@@ -187,13 +188,11 @@ class ConnectionHandler:
         # print("data1: ", data1)
         i = data.find('\r\n\r\n')+4
         data = data[i:]
-        print data
         l.append(data)
-        print l
         print "Length of Data : ", sys.getsizeof(data)
         print " Length of Lower Bytes : ", sys.getsizeof(self.bytes_list[0])
         print " Length of Upper Bytes : ", sys.getsizeof(self.bytes_list[1])
-        raw_input("Returning From Get...")
+        #raw_input("Returning From Get...")
         
         return
 
@@ -230,16 +229,17 @@ class ConnectionHandler:
             get_request_high_range.start()
 
             
+            """ Wait for each GET request to finish. """
             get_request_low_range.join()
             get_request_high_range.join()
             
-            data = "".join(self.bytes_list)
-            print("Merged Data Length: " , sys.getsizeof(data))
-            print data + "."
+            """ Use the join() list method to concatenate the two byte strings in the list. """
+            self.data = "".join(self.bytes_list)
+            print("Merged Data Length: " , sys.getsizeof(self.data))
             print("Original Content length: ",self.content_length)
-            print("difference of {} bytes between content length and merged data".format(int(self.content_length)-sys.getsizeof(data)))
-            self.write(data)
-            #raw_input("Press Any Key To Continue....")
+            print("difference of {} bytes between content length and merged data".format(int(self.content_length)-sys.getsizeof(self.data)))
+            self.write(self.data)
+            self.send_to_client()
 
         else:
             self.target.send('%s %s %s\n%s\n'%(self.method, path, self.protocol , self.client_buffer))
@@ -290,20 +290,20 @@ class ConnectionHandler:
 
         return r
 
+    def send_to_client(self):
+        if self.data:
+            self.client.send(self.data)
+            self.data = ""
+
     def write(self,data):
         with open('out.jpg','wb') as f:
             f.write(data)
 
-
-
     #"revolving door" to re-direct the packets in the right direction
     def _read_write(self):
         time_out_max = self.timeout/3
-        socs = [self.client, self.target, self.target2]
+        socs = [self.client, self.target]
         count = 0
-        data1 = None
-        data2 = None
-
         while 1:
             count += 1
             (recv, _, error) = select.select(socs, [], socs, 3)
@@ -312,12 +312,16 @@ class ConnectionHandler:
             if recv:
                 for in_ in recv:
                     data = in_.recv(BUFLEN)
-                    print "Recieved, data1 is: ", data1
                     if in_ is self.client:
                         out = self.target
                     else:
                         out = self.client
                     if data:
+                        #TO DO: Check if it's response to the RANGE request and extract the Content-Length
+
+
+                        #TO DO: merge the data from both interfaces into one big data, if we are receiving
+
                         out.send(data)
                         count = 0
             if count == time_out_max:
