@@ -1,8 +1,6 @@
-# -*- coding: cp1252 -*-
-# <PythonProxy.py>
-#
-# Copyright (c) <2009> <Fábio Domingues - fnds3000 in gmail.com>
-
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+# Copyright (c) <2009> <Fbio Domingues - fnds3000 in gmail.com>
 # Permission is hereby granted, free of charge, to any person
 # obtaining a copy of this software and associated documentation
 # files (the "Software"), to deal in the Software without
@@ -101,7 +99,8 @@ class ConnectionHandler:
         self.timeout = timeout
         self.content_length = None
         self.host = None
-        self.bytes_list = []
+        self.bytes_lower_range = []
+	self.bytes_upper_range = []
         self.data = ""
 
         #print the request and it extracts the protocol and path
@@ -128,8 +127,14 @@ class ConnectionHandler:
         print "Sending Request For Content Length...."
         print s
         self.target.send(s)
-        data = self.target.recv(BUFLEN)
+	data = ""
+	while True:
+		data += self.target.recv(BUFLEN)
+		if data.find("\r\n\r\n") != -1:
+			break
         print data
+	print sys.getsizeof(data)
+	#raw_input("Press Any Key To Conitnue")
         return re.search(r'Content-Length: \d+', data).group(0).split(" ")[1]
 
         #check accept_range.. bytes means OK to split
@@ -174,10 +179,21 @@ class ConnectionHandler:
 
         print("Inside The Get Request\n")
         print('%s %s %s\n%s\n'%(self.method, path, self.protocol,self.create_range(start_byte,end_byte))+self.client_buffer)
+	#raw_input("Press Any Key To Conitnue")
         target.send('%s %s %s\n%s\n'%(self.method, path, self.protocol,self.create_range(start_byte,end_byte))+self.client_buffer)
-
+	
+	i = 0
+	
         while(sys.getsizeof(data) < (int(end_byte) - int(start_byte))):
-            data += target.recv(10000)
+	    i += 1
+	    if i % 1000 == 0:
+	    	print "Recieving data on ", target
+		print "Current Size Of Data: ", sys.getsizeof(data)
+		print "Data: ", data
+		print "Waiting for it to be Size: ", (int(end_byte) - int(start_byte))
+		#raw_input("Press Any Key To Conitnue")
+            data += target.recv(512)
+		
 
         #make sure response is a 206 partial content header
         #response = int(data.split('\r\n')[0].split(' ')[1])
@@ -188,10 +204,10 @@ class ConnectionHandler:
         # print("data1: ", data1)
         i = data.find('\r\n\r\n')+4
         data = data[i:]
-        l.append(data)
+        l[0] += data
         print "Length of Data : ", sys.getsizeof(data)
-        print " Length of Lower Bytes : ", sys.getsizeof(self.bytes_list[0])
-        print " Length of Upper Bytes : ", sys.getsizeof(self.bytes_list[1])
+        print " Length of Lower Bytes : ", sys.getsizeof(self.bytes_lower_range[0])
+        print " Length of Upper Bytes : ", sys.getsizeof(self.bytes_upper_range[0])
         #raw_input("Returning From Get...")
         
         return
@@ -214,17 +230,22 @@ class ConnectionHandler:
             """ Make two get requests, each its own percentage of the overall data """
             percent = 0.5
             byte_range = self.get_range(percent)
-            print("byte_range: ", byte_range, type(byte_range))
+	    self.bytes_lower_range.append("")
+	    self.bytes_upper_range.append("")
+            end = str(int(self.content_length) - 1)
+            print("Lower Range: 0-" + str(byte_range), type(byte_range))
+            print("Upper Range: " + str(byte_range + 1) + "-" + end, type(byte_range))
             print("Content length: ", self.content_length,type(self.content_length))
+	    #raw_input("Press Any Key To Conitnue")
 
             """ Make a get request for the lower range of bytes on its own thread """
-            get_request_low_range = threading.Thread(target=self.get, args=(self.target, 0, byte_range, self.bytes_list))
+            get_request_low_range = threading.Thread(target=self.get, args=(self.target, 0, byte_range, self.bytes_lower_range))
             get_request_low_range.daemon = True
             get_request_low_range.start()
 
             """ Make a get request for the higher range of bytes on its own thread """
-            end = str(int(self.content_length) - 1)
-            get_request_high_range = threading.Thread(target=self.get, args=(self.target2, byte_range+1, end, self.bytes_list))
+	
+            get_request_high_range = threading.Thread(target=self.get, args=(self.target2, byte_range+1, end, self.bytes_upper_range))
             get_request_high_range.daemon = True
             get_request_high_range.start()
 
@@ -258,14 +279,18 @@ class ConnectionHandler:
             port = 80
 
         print "Setting Up Connection Target 1...."
-        (soc_family, _, _, _, address) = socket.getaddrinfo(host, port)[0]
-        self.target = socket.socket(soc_family)
-        self.target.connect(address)
+        #(soc_family, _, _, _, address) = socket.getaddrinfo(host, port)[0]
+        self.target = socket.socket((socket.AF_INET))
+        #self.target.connect(address)
+        self.target.bind(('10.0.1.1',0))
+        self.target.connect(('100.100.1.1',8000))
 
         print "Setting Up Connection Target 2...."
-        (soc_family, _, _, _, address) = socket.getaddrinfo(host, port)[0]
-        self.target2 = socket.socket(soc_family)
-        self.target2.connect(address)
+        #(soc_family, _, _, _, address) = socket.getaddrinfo(host, port)[0]
+        self.target2 = socket.socket((socket.AF_INET))
+        #self.target2.connect(address)
+        self.target2.bind(('10.0.2.1',0))
+        self.target2.connect(('100.100.2.1',8000))
         print "Success"
 
     def read(self, socs):
